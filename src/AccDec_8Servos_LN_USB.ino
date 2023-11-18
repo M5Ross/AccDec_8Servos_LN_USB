@@ -11,7 +11,7 @@
        *********************************************/
 
 #define HW_VERSION 11
-#define SW_VERSION 21
+#define SW_VERSION 22
 
 #define LN_VERSION 2
 
@@ -470,6 +470,22 @@ void SerialUSBLoconetCom(void) {
 
 #endif
 
+// Construct a Loconet packet that requests a turnout to set/change its state
+void sendOPC_SW_REQ(int address, uint8_t dir, uint8_t on) {
+    lnMsg SendPacket ;
+    
+    int sw2 = 0x00;
+    if (dir) { sw2 |= B00100000; }
+    if (on) { sw2 |= B00010000; }
+    sw2 |= (address >> 7) & 0x0F;
+    
+    SendPacket.data[ 0 ] = OPC_SW_REQ ;
+    SendPacket.data[ 1 ] = address & 0x7F ;
+    SendPacket.data[ 2 ] = sw2 ;
+    
+    LocoNet.send( &SendPacket );
+}
+
 void ResetCV(bool forcereset) {
   #if defined(DECODER_LOADED)
   if ( Dcc.getCV(CV_DECODER_MASTER_RESET)== CV_DECODER_MASTER_RESET || Dcc.getCV(CV_ACCESSORY_DECODER_ADDRESS_LSB) == 255 || forcereset == true) 
@@ -528,10 +544,12 @@ extern void notifyDccAccTurnoutOutput( uint16_t Addr, uint8_t Direction, uint8_t
     #endif
     ProgAdr = false;
   }
-  else {  
+  else {
+    byte not_for_me = true;
     if (CV28.GetMultiAdr()) {
       for (uint8_t i=0; i < numfpins; i++) {
         if (ftn_queue[i].multi_address == Addr) {
+          not_for_me = false;
           if (ftn_queue[i].single_invert) {
             exec_function(i, Direction ? 0 : 1);
           }
@@ -544,6 +562,7 @@ extern void notifyDccAccTurnoutOutput( uint16_t Addr, uint8_t Direction, uint8_t
     else {
       uint16_t Current_Decoder_Addr = Dcc.getAddr();
       if ( Addr >= Current_Decoder_Addr && Addr < Current_Decoder_Addr+numfpins) { //Controls Accessory_Address+8
+        not_for_me = false;
         if (ftn_queue[Addr-Current_Decoder_Addr].single_invert) {
           exec_function(Addr-Current_Decoder_Addr, Direction ? 0 : 1);
         }
@@ -551,6 +570,10 @@ extern void notifyDccAccTurnoutOutput( uint16_t Addr, uint8_t Direction, uint8_t
           exec_function(Addr-Current_Decoder_Addr, Direction ? 1 : 0);
         }
       }
+    }
+    if (not_for_me && CV28.GetDccLn()) {
+      sendOPC_SW_REQ(Addr, Direction ? 1 : 0, 1);
+      sendOPC_SW_REQ(Addr, Direction ? 1 : 0, 0);
     }
   }
 }
